@@ -32,17 +32,23 @@ Scan the QR with Expo Go (Android) or the Camera app (iOS).
 
 ## Add your API key
 
-Snap needs an API key to estimate photos. It supports **two providers** and
-auto-detects which one your key is for:
+Snap needs an API key to estimate photos. It supports **five providers** —
+pick one and paste its key in the app; Snap stores which provider a key belongs
+to alongside it (two providers' keys have no recognisable prefix).
 
-| Provider | Cost | Get a key |
-|---|---|---|
-| **Google Gemini** | **Free tier** (no card needed) | <https://aistudio.google.com/apikey> |
-| **Anthropic Claude** | Paid — needs API credits | <https://console.anthropic.com/settings/keys> |
+| Provider | Cost | Vision model | Get a key |
+|---|---|---|---|
+| **Google Gemini** | **Free tier** (no card needed) | `gemini-flash-latest` | <https://aistudio.google.com/apikey> |
+| **NVIDIA NIM** | **Free to prototype** (40 req/min, no billing) | `meta/llama-3.2-90b-vision-instruct` | <https://build.nvidia.com> |
+| **Mistral** | **Free Studio tier** | `mistral-small-latest` | <https://console.mistral.ai> |
+| **OpenCode Zen** | Pay-as-you-go (free Zen models have no vision) | `gpt-5.6-luna` (low-cost multimodal) | <https://opencode.ai/auth> |
+| **Anthropic Claude** | Paid — needs API credits | `claude-sonnet-4-6` | <https://console.anthropic.com/settings/keys> |
 
-> Gemini is the easiest way to try it for free. Anthropic keys need credits added
-> under *Plans & Billing* — a Claude.ai chat subscription does **not** include API
-> credits.
+> Gemini, NVIDIA NIM and Mistral are the easiest ways to try it for free.
+> Anthropic keys need credits added under *Plans & Billing* — a Claude.ai chat
+> subscription does **not** include API credits. OpenCode Zen is a gateway: its
+> free models are text/code only, so photo estimates go through a low-cost
+> multimodal model.
 
 There are two ways to give Snap the key:
 
@@ -87,8 +93,10 @@ npm run doctor
 ## How it works
 
 - **Estimate.** One `fetch` sends a resized/compressed JPEG plus a prompt asking
-  for a per-item JSON breakdown. Provider is chosen by key prefix (`sk-ant-…` →
-  Anthropic `claude-sonnet-4-6`; otherwise Google `gemini-flash-latest`).
+  for a per-item JSON breakdown. The provider is chosen by the selection in the
+  key form: Gemini uses the Generative Language API; Anthropic the Messages API;
+  NVIDIA NIM, Mistral and OpenCode Zen share the OpenAI `chat/completions`
+  shape with a base64 `image_url` part.
 - **Storage.** Local SQLite (`expo-sqlite`) for the profile, meals, and per-day
   targets; photos are JPEGs in the app's document directory. Daily totals are
   aggregated from items, never denormalised.
@@ -102,7 +110,8 @@ npm run doctor
 
 ```
 app/          Screens (expo-router): onboarding/, (tabs)/, capture, review, manual
-src/api/      vision.ts (facade), anthropic.ts, gemini.ts, parse.ts, keyStore.ts
+src/api/      vision.ts (facade), providers.ts (registry), anthropic.ts, gemini.ts,
+             nvidia.ts, mistral.ts, zen.ts, openaiCompat.ts (shared), parse.ts, keyStore.ts
 src/db/       schema.ts, index.ts, queries.ts   (all SQL lives here)
 src/logic/    bmr, macros, scaling, dates, units, export
 src/store/    Zustand stores

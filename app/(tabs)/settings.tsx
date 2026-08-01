@@ -3,7 +3,13 @@ import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, StyleSheet, View } from 'react-native';
 
-import { clearApiKey, maskedApiKey } from '@/api/keyStore';
+import {
+  clearApiKey,
+  getProvider,
+  maskedApiKey,
+  type Provider,
+} from '@/api/keyStore';
+import { providerConfig } from '@/api/providers';
 import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
 import { ApiKeySheet } from '@/components/settings/ApiKeySheet';
@@ -35,12 +41,14 @@ export default function SettingsScreen() {
   const refreshDay = useDayStore((state) => state.refresh);
 
   const [maskedKey, setMaskedKey] = useState<string | null>(null);
+  const [provider, setProvider] = useState<Provider | null>(null);
   const [profileField, setProfileField] = useState<ProfileField | null>(null);
   const [splitOpen, setSplitOpen] = useState(false);
   const [keyOpen, setKeyOpen] = useState(false);
 
   const loadKey = useCallback(() => {
     void maskedApiKey().then(setMaskedKey);
+    void getProvider().then(setProvider);
   }, []);
 
   useEffect(loadKey, [loadKey]);
@@ -174,6 +182,11 @@ export default function SettingsScreen() {
         </Card>
 
         <Card title="API key" padded={false}>
+          <SettingsRow
+            label="Provider"
+            value={provider ? providerConfig(provider).label : undefined}
+            showChevron={false}
+          />
           <SettingsRow
             label="Key"
             value={maskedKey ?? 'Not set'}

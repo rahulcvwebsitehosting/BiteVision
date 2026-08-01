@@ -46,8 +46,8 @@ export default function ApiKeyStep() {
   return (
     <StepShell
       step="api-key"
-      title="Add your Anthropic key."
-      detail="Snap has no server of its own. Photo estimates go straight from this phone to Anthropic, billed to your key."
+      title="Add your key."
+      detail="Snap has no server of its own. Photo estimates go straight from this phone to your chosen provider, billed to your key. Pick a provider — Google Gemini, NVIDIA NIM and Mistral all have free tiers."
     >
       <ApiKeyForm onSaved={() => advance(false)} saveLabel="Save and continue" />
 

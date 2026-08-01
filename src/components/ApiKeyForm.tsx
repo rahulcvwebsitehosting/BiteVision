@@ -3,15 +3,14 @@ import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 import { Linking, Pressable, StyleSheet, View } from 'react-native';
 
-import { looksLikeApiKey, setApiKey } from '@/api/keyStore';
+import { ChoiceList } from '@/components/Choice';
+import { looksLikeApiKey, setApiKey, type Provider } from '@/api/keyStore';
+import { PROVIDERS, providerConfig } from '@/api/providers';
 import { VisionError, verifyApiKey } from '@/api/vision';
 import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
 import { Body, Caption } from '@/components/Type';
 import { color, opacity, space } from '@/constants/theme';
-
-const CONSOLE_URL = 'https://console.anthropic.com/settings/keys';
-const GEMINI_CONSOLE_URL = 'https://aistudio.google.com/apikey';
 
 type TestState =
   | { status: 'idle' }
@@ -28,18 +27,24 @@ interface Props {
 /**
  * Key entry, shared by onboarding and Settings. The key goes straight to
  * `keyStore` and is never lifted into component state beyond this form.
+ *
+ * The provider is chosen here too — two of the providers (Mistral, Zen) have
+ * keys with no recognisable prefix, so the provider cannot be recovered from
+ * the key alone and must be stored alongside it.
  */
 export function ApiKeyForm({ onSaved, saveLabel = 'Save key' }: Props) {
+  const [provider, setProvider] = useState<Provider>('gemini');
   const [value, setValue] = useState('');
   const [test, setTest] = useState<TestState>({ status: 'idle' });
   const [helpOpen, setHelpOpen] = useState(false);
 
-  const shaped = looksLikeApiKey(value);
+  const config = providerConfig(provider);
+  const shaped = looksLikeApiKey(value, provider);
 
   const runTest = async () => {
     setTest({ status: 'testing' });
     try {
-      await setApiKey(value);
+      await setApiKey(value, provider);
       await verifyApiKey();
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setTest({ status: 'passed' });
@@ -56,37 +61,51 @@ export function ApiKeyForm({ onSaved, saveLabel = 'Save key' }: Props) {
           kind === 'unauthorized'
             ? 'That key was rejected. Check you copied all of it.'
             : kind === 'billing'
-              ? 'The key works, but the account has no API credits. Add credits at console.anthropic.com → Plans & Billing.'
+              ? `${config.label} accepted the key, but the account has no credits. Add credits with your provider, then try again.`
               : `Test failed — kind: ${kind}. ${detail}`,
       });
     }
   };
 
   const save = async () => {
-    await setApiKey(value);
+    await setApiKey(value, provider);
     onSaved();
   };
 
   return (
     <View style={styles.root}>
+      <ChoiceList
+        options={PROVIDERS.map((p) => ({
+          value: p.id,
+          label: p.free ? `${p.label} · Free` : p.label,
+          detail: p.note,
+        }))}
+        value={provider}
+        onChange={(next) => {
+          setProvider(next);
+          setValue('');
+          setTest({ status: 'idle' });
+        }}
+      />
+
       <Field
         value={value}
         onChangeText={(next) => {
           setValue(next);
           setTest({ status: 'idle' });
         }}
-        label="API key"
-        placeholder="sk-ant-… or a Google AI key"
+        label={`${config.label} API key`}
+        placeholder={placeholderFor(provider)}
         secureTextEntry
         autoFocus
         hint={
           shaped || value.length === 0
-            ? 'Anthropic or Google Gemini. Stored in this phone’s keychain; it never leaves the device except to call that provider.'
+            ? `${config.note ?? 'Stored in this phone’s keychain; it never leaves the device except to call that provider.'}`
             : undefined
         }
         error={
           value.length > 0 && !shaped
-            ? 'That doesn’t look like an Anthropic (sk-ant-…) or Google AI key.'
+            ? `That doesn’t look like a ${config.label} key.`
             : undefined
         }
       />
@@ -112,20 +131,13 @@ export function ApiKeyForm({ onSaved, saveLabel = 'Save key' }: Props) {
       {helpOpen ? (
         <View style={styles.helpBody}>
           <Body muted>
-            Snap calls the provider directly from your phone with your own key —
-            no server in between. Use an Anthropic key, or a Google AI (Gemini)
-            key, which has a free tier. Create one, copy it once, and paste it
-            here.
+            Snap calls {config.label} directly from your phone with your own key
+            — no server in between. Create one, copy it once, and paste it here.
           </Body>
           <Button
-            label="Anthropic console"
+            label={`${config.label} console`}
             variant="secondary"
-            onPress={() => void Linking.openURL(CONSOLE_URL)}
-          />
-          <Button
-            label="Google AI Studio (free)"
-            variant="secondary"
-            onPress={() => void Linking.openURL(GEMINI_CONSOLE_URL)}
+            onPress={() => void Linking.openURL(config.keyUrl)}
           />
         </View>
       ) : null}
@@ -152,6 +164,21 @@ export function ApiKeyForm({ onSaved, saveLabel = 'Save key' }: Props) {
       </View>
     </View>
   );
+}
+
+function placeholderFor(provider: Provider): string {
+  switch (provider) {
+    case 'anthropic':
+      return 'sk-ant-…';
+    case 'gemini':
+      return 'AIza…';
+    case 'nvidia':
+      return 'nvapi-…';
+    case 'mistral':
+      return 'your Mistral key';
+    case 'zen':
+      return 'your Zen key';
+  }
 }
 
 const styles = StyleSheet.create({

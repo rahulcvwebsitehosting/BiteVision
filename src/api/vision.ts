@@ -1,15 +1,18 @@
 import { estimateWithAnthropic, verifyAnthropicKey } from '@/api/anthropic';
 import { VisionError } from '@/api/errors';
 import { estimateWithGemini, verifyGeminiKey } from '@/api/gemini';
-import { getApiKey, providerForKey } from '@/api/keyStore';
+import { estimateWithMistral, verifyMistralKey } from '@/api/mistral';
+import { estimateWithNvidia, verifyNvidiaKey } from '@/api/nvidia';
+import { estimateWithZen, verifyZenKey } from '@/api/zen';
+import { getApiKey, getProvider } from '@/api/keyStore';
 import { parseEstimate } from '@/api/parse';
 import type { MealEstimate } from '@/types';
 
 /**
  * The vision facade. Screens call `estimateMeal` and `verifyApiKey` here; this
- * module picks the provider from the stored key and dispatches to the matching
- * transport, then parses the shared JSON shape. The Anthropic and Gemini
- * modules own their own request/error details.
+ * module reads the stored provider and dispatches to the matching transport,
+ * then parses the shared JSON shape. Each provider module owns its own
+ * request/error details.
  */
 
 export { VisionError } from '@/api/errors';
@@ -32,12 +35,10 @@ export async function estimateMeal(
   if (!apiKey) {
     throw new VisionError('no_key', 'No API key is set.');
   }
-  const provider = providerForKey(apiKey);
+  const provider = await getProvider();
 
   const request = () =>
-    provider === 'anthropic'
-      ? estimateWithAnthropic(apiKey, base64Jpeg, signal)
-      : estimateWithGemini(apiKey, base64Jpeg, signal);
+    dispatch(provider, apiKey, base64Jpeg, signal);
 
   try {
     return parseEstimate(await request());
@@ -55,9 +56,39 @@ export async function verifyApiKey(): Promise<void> {
   if (!apiKey) {
     throw new VisionError('no_key', 'No API key is set.');
   }
-  return providerForKey(apiKey) === 'anthropic'
-    ? verifyAnthropicKey(apiKey)
-    : verifyGeminiKey(apiKey);
+  const provider = await getProvider();
+  switch (provider) {
+    case 'anthropic':
+      return verifyAnthropicKey(apiKey);
+    case 'gemini':
+      return verifyGeminiKey(apiKey);
+    case 'nvidia':
+      return verifyNvidiaKey(apiKey);
+    case 'mistral':
+      return verifyMistralKey(apiKey);
+    case 'zen':
+      return verifyZenKey(apiKey);
+  }
+}
+
+function dispatch(
+  provider: Awaited<ReturnType<typeof getProvider>>,
+  apiKey: string,
+  base64Jpeg: string,
+  signal: AbortSignal | undefined,
+): Promise<string> {
+  switch (provider) {
+    case 'anthropic':
+      return estimateWithAnthropic(apiKey, base64Jpeg, signal);
+    case 'gemini':
+      return estimateWithGemini(apiKey, base64Jpeg, signal);
+    case 'nvidia':
+      return estimateWithNvidia(apiKey, base64Jpeg, signal);
+    case 'mistral':
+      return estimateWithMistral(apiKey, base64Jpeg, signal);
+    case 'zen':
+      return estimateWithZen(apiKey, base64Jpeg, signal);
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -89,9 +120,9 @@ export function copyForError(error: unknown): VisionErrorCopy {
       };
     case 'billing':
       return {
-        title: 'Your Anthropic account is out of credits',
+        title: 'Your account is out of credits',
         detail:
-          'The key works, but the account has no API credits. Add credits at console.anthropic.com under Plans & Billing, then try again.',
+          'The key works, but the account has no API credits. Add credits with your provider, then try again.',
         action: 'retry',
       };
     case 'rate_limited':

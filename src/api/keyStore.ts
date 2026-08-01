@@ -1,6 +1,8 @@
 import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 
+import { providerConfig } from '@/api/providers';
+
 /**
  * The only module that touches the Anthropic API key.
  *
@@ -21,6 +23,7 @@ import * as SecureStore from 'expo-secure-store';
  */
 
 const STORAGE_KEY = 'anthropic_api_key';
+const PROVIDER_STORAGE_KEY = 'vision_provider';
 const SEEDED_FLAG = 'anthropic_api_key_seeded';
 
 function bundledDevKey(): string | null {
@@ -48,6 +51,9 @@ export async function seedFromEnvironment(): Promise<void> {
   if (existing !== devKey) {
     await SecureStore.setItemAsync(STORAGE_KEY, devKey);
   }
+  // The bundled dev key is an Anthropic key (see .env.example); write the
+  // provider so the dispatcher never has to rely on prefix inference for it.
+  await SecureStore.setItemAsync(PROVIDER_STORAGE_KEY, 'anthropic');
   await SecureStore.setItemAsync(SEEDED_FLAG, 'true');
 }
 
@@ -59,15 +65,25 @@ export async function hasApiKey(): Promise<boolean> {
   return (await getApiKey()) !== null;
 }
 
-export async function setApiKey(value: string): Promise<void> {
+/**
+ * Stores the key together with the provider it belongs to. The provider is
+ * needed because two of the providers (Mistral, Zen) have keys with no
+ * recognisable prefix, so it cannot be recovered from the key alone.
+ */
+export async function setApiKey(
+  value: string,
+  provider: Provider,
+): Promise<void> {
   await SecureStore.setItemAsync(STORAGE_KEY, value.trim());
+  await SecureStore.setItemAsync(PROVIDER_STORAGE_KEY, provider);
 }
 
 export async function clearApiKey(): Promise<void> {
   await SecureStore.deleteItemAsync(STORAGE_KEY);
+  await SecureStore.deleteItemAsync(PROVIDER_STORAGE_KEY);
 }
 
-/** `sk-ant-…4f2a` — enough to recognise a key, not enough to use one. */
+/** `sk-ant-…4f2a` or `nvapi-…a3b2` — enough to recognise a key, not use one. */
 export function maskKey(value: string): string {
   if (value.length <= 12) return '••••••••';
   return `${value.slice(0, 7)}…${value.slice(-4)}`;
@@ -78,26 +94,53 @@ export async function maskedApiKey(): Promise<string | null> {
   return key ? maskKey(key) : null;
 }
 
-export type Provider = 'anthropic' | 'gemini';
+export type Provider = 'anthropic' | 'gemini' | 'nvidia' | 'mistral' | 'zen';
 
-/**
- * Which service a key belongs to, inferred from its prefix. Anthropic keys
- * start with `sk-ant-`; anything else is treated as a Google (Gemini) key,
- * which is what the app's only other provider uses.
- */
-export function providerForKey(value: string): Provider {
-  return value.trim().startsWith('sk-ant-') ? 'anthropic' : 'gemini';
+const ALL_PROVIDERS: readonly Provider[] = [
+  'anthropic',
+  'gemini',
+  'nvidia',
+  'mistral',
+  'zen',
+];
+
+function isProvider(value: string | null): value is Provider {
+  return value !== null && (ALL_PROVIDERS as readonly string[]).includes(value);
 }
 
 /**
- * Shape check only. A real check costs a request — see `verifyApiKey` in
- * `src/api/vision.ts`. Accepts both an Anthropic key (`sk-ant-…`) and a Google
- * AI key (`AIza…` or the newer `AQ.…` form).
+ * The provider the current key belongs to. Returns the stored choice, or — for a
+ * pre-multi-provider install that has a key but no stored provider — falls
+ * back to inferring it from the key prefix.
  */
-export function looksLikeApiKey(value: string): boolean {
+export async function getProvider(): Promise<Provider> {
+  const stored = await SecureStore.getItemAsync(PROVIDER_STORAGE_KEY);
+  if (isProvider(stored)) return stored;
+  const key = await getApiKey();
+  return key ? providerForKey(key) : 'gemini';
+}
+
+/**
+ * Which service a key belongs to, inferred from its prefix. Only used to bring
+ * forward keys from older installs that have no stored provider; new keys
+ * carry the provider explicitly via `setApiKey`.
+ */
+export function providerForKey(value: string): Provider {
   const trimmed = value.trim();
-  return (
-    /^sk-ant-[A-Za-z0-9_-]{20,}$/.test(trimmed) ||
-    /^(AIza|AQ\.)[A-Za-z0-9_.\-]{10,}$/.test(trimmed)
-  );
+  if (trimmed.startsWith('sk-ant-')) return 'anthropic';
+  if (trimmed.startsWith('nvapi-')) return 'nvidia';
+  return 'gemini';
+}
+
+/**
+ * Shape check only — a real check costs a request (see `verifyApiKey` in
+ * `src/api/vision.ts`). The shape is taken from the provider registry, so each
+ * provider validates against its own key pattern. Passing the provider is
+ * required because keys without a prefix (Mistral, Zen) cannot be told apart
+ * from each other by shape alone.
+ */
+export function looksLikeApiKey(value: string, provider: Provider): boolean {
+  const trimmed = value.trim();
+  const shape = providerConfig(provider).keyShape;
+  return shape.test(trimmed);
 }
